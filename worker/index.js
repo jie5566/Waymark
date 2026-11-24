@@ -73,12 +73,14 @@ export default {
   const GEMINI_KEY = env.GEMINI_API_KEY || "";
   const GEMINI_MODEL = env.GEMINI_MODEL || "gemini-3.5-flash-lite";
   cors = {
-    "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
-    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "https://jie5566.github.io",
+    "Access-Control-Allow-Headers": "content-type, x-waymark-token",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
   };
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
+  // Private use: only requests carrying the access code (secret APP_TOKEN) are served.
+  if (env.APP_TOKEN && req.headers.get("x-waymark-token") !== env.APP_TOKEN) return json({ error: "unauthorized" }, 401);
   if (!GEMINI_KEY) return json({ error: "GEMINI_API_KEY is not set" }, 500);
 
   let body;

@@ -4,6 +4,9 @@ window.JV = window.JV || {};
 (function () {
   const cfg = window.JV_CONFIG || {};
   JV.aiEnabled = !!cfg.AI_URL;
+  // The access code lives only in this browser, never in the code on GitHub.
+  JV.getToken = () => { try { return localStorage.getItem("waymark.token") || ""; } catch { return ""; } };
+  JV.setToken = v => { try { localStorage.setItem("waymark.token", v); } catch { /* storage off */ } };
 
   JV.ask = async function (message) {
     const s = JV.store.state;
@@ -18,10 +21,11 @@ window.JV = window.JV || {};
     const res = await fetch(cfg.AI_URL, {
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json" },
+        JV.getToken() ? { "x-waymark-token": JV.getToken() } : {},
         cfg.SUPABASE_ANON_KEY ? { Authorization: `Bearer ${cfg.SUPABASE_ANON_KEY}`, apikey: cfg.SUPABASE_ANON_KEY } : {}),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("AI " + res.status);
+    if (!res.ok) { const e = new Error("AI " + res.status); e.status = res.status; throw e; }
     const data = await res.json();
     return { reply: data.reply || "", quickReplies: data.quickReplies || [], entries: data.entries || [] };
   };

@@ -55,6 +55,13 @@
           <button class="btn" id="drafts-discard" data-i18n="discard"></button>
         </div>
       </div>
+      <form class="token" id="token-form" hidden>
+        <label for="token-input" id="token-label"></label>
+        <div class="token-row">
+          <input id="token-input" type="password" autocomplete="current-password">
+          <button class="btn primary" type="submit" id="token-save"></button>
+        </div>
+      </form>
       <div class="chat" id="chat" aria-live="polite"></div>
       <div class="quick" id="quick"></div>
       <form class="composer" id="composer">

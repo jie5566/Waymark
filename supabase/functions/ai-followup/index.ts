@@ -10,7 +10,7 @@ const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 
 const cors = {
   "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-waymark-token",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -82,6 +82,8 @@ async function fetchPageText(url: string): Promise<string> {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
+  const APP_TOKEN = Deno.env.get("APP_TOKEN");
+  if (APP_TOKEN && req.headers.get("x-waymark-token") !== APP_TOKEN) return json({ error: "unauthorized" }, 401);
   if (!GEMINI_KEY) return json({ error: "GEMINI_API_KEY is not set" }, 500);
 
   let body: any;

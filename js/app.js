@@ -60,14 +60,32 @@
       if (r.entries?.length) { drafts = drafts.concat(r.entries); }
       setQuick(r.quickReplies);
     } catch (err) {
-      st.chat.push({ role: "ai", text: JV.t().aiError });
-      drafts.push({ type: "apply", title: text.slice(0, 60), region: st.regions[0]?.name });
+      if (err.status === 401) {
+        // Wrong or missing access code: ask for it, and put the message back so nothing is lost.
+        st.chat.pop(); $("#msg").value = text; showToken(true);
+      } else {
+        st.chat.push({ role: "ai", text: JV.t().aiError });
+        drafts.push({ type: "apply", title: text.slice(0, 60), region: st.regions[0]?.name });
+      }
     }
     busy = false; S.save(); renderChat(); renderDrafts();
   }
   $("#composer").addEventListener("submit", e => { e.preventDefault(); const m = $("#msg"); send(m.value); m.value = ""; m.style.height = ""; });
   $("#msg").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#composer").requestSubmit(); } });
   $("#msg").addEventListener("input", e => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; });
+
+  // ---------- access code ----------
+  function showToken(wrong) {
+    const t = JV.t(), f = $("#token-form");
+    $("#token-label").textContent = wrong && JV.getToken() ? t.tokenWrong : t.tokenLabel;
+    $("#token-save").textContent = t.tokenSave;
+    f.hidden = false; $("#token-input").focus();
+  }
+  $("#token-form").addEventListener("submit", e => {
+    e.preventDefault(); const v = $("#token-input").value.trim(); if (!v) return;
+    JV.setToken(v); $("#token-input").value = ""; $("#token-form").hidden = true;
+    if ($("#msg").value.trim()) $("#composer").requestSubmit();
+  });
 
   // ---------- drafts (the card that fills while you talk) ----------
   function renderDrafts() {
