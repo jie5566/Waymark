@@ -17,7 +17,8 @@ window.JV = window.JV || {};
     if (!JV.aiEnabled) return demo(message);
     const res = await fetch(cfg.AI_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.SUPABASE_ANON_KEY}`, apikey: cfg.SUPABASE_ANON_KEY },
+      headers: Object.assign({ "Content-Type": "application/json" },
+        cfg.SUPABASE_ANON_KEY ? { Authorization: `Bearer ${cfg.SUPABASE_ANON_KEY}`, apikey: cfg.SUPABASE_ANON_KEY } : {}),
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error("AI " + res.status);
