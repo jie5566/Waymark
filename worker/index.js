@@ -84,11 +84,13 @@ export default {
   let body;
   try { body = await req.json(); } catch { return json({ error: "Bad JSON" }, 400); }
   const { message = "", history = [], lang = "zh", regions = [], stats = {}, today = "", quiet = false } = body;
-  if (typeof message !== "string" || message.length > 4000) return json({ error: "Bad message" }, 400);
+  if (typeof message !== "string" || !message.trim()) return json({ error: "Bad message" }, 400);
+  // Long pastes (a whole job description) are fine: keep the first 12,000 characters.
+  const msg = message.slice(0, 12000);
 
   // If the user pasted a link, try to read the page so Gemini sees the job post.
   let pageNote = "";
-  const url = message.match(/https?:\/\/\S+/)?.[0];
+  const url = msg.match(/https?:\/\/\S+/)?.[0];
   if (url) {
     const text = await fetchPageText(url);
     pageNote = text
@@ -98,7 +100,7 @@ export default {
 
   const contents = [
     ...history.slice(-10).map((m) => ({ role: m.role === "ai" ? "model" : "user", parts: [{ text: String(m.text).slice(0, 2000) }] })),
-    { role: "user", parts: [{ text: message + pageNote }] },
+    { role: "user", parts: [{ text: msg + pageNote }] },
   ];
 
   // Try the preferred model first; if Google is busy (429/503) or slow, fall back to the next one.
