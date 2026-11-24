@@ -9,6 +9,7 @@ html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
 button,textarea,input{font:inherit;color:inherit}
 button{cursor:pointer}
+[hidden]{display:none !important}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .muted{color:var(--muted)} .small{font-size:12px}
 h1{margin:0;font-size:26px;font-weight:600;letter-spacing:.3px}

@@ -44,7 +44,7 @@ Your job on every turn:
 4. When it helps, suggest a concrete next step with a date (YYYY-MM-DD), e.g. reaching out to a designer on the hiring team 5 days after applying. Say which roles or people to look for; you cannot search LinkedIn yourself.
 5. quickReplies: 0–3 very short tappable answers to your question, in the user's language.
 6. For job posts, put 3–6 skill keywords from the description in "keywords" (in English, lower case).
-If a link could not be read, ask for the company and role instead of guessing.
+If a link could not be read, ask for the company and role instead of guessing.\nEvery field is short, final text for the user (title and role under 60 characters, insight and nextText under 140). Never put reasoning, notes or placeholders in any field.
 
 Today is ${today}. User's recent numbers: ${JSON.stringify(stats)}.`;
 }
@@ -72,6 +72,7 @@ export default {
   async fetch(req, env) {
   const GEMINI_KEY = env.GEMINI_API_KEY || "";
   const GEMINI_MODEL = env.GEMINI_MODEL || "gemini-3.6-flash";
+  const GEMINI_THINKING = env.GEMINI_THINKING || "low";
   cors = {
     "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
     "Access-Control-Allow-Headers": "content-type",
@@ -109,7 +110,7 @@ export default {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt(lang, regions, stats, today, quiet) }] },
         contents,
-        generationConfig: { responseMimeType: "application/json", responseSchema },
+        generationConfig: { responseMimeType: "application/json", responseSchema, thinkingConfig: { thinkingLevel: GEMINI_THINKING } },
       }),
     },
   );
@@ -118,12 +119,26 @@ export default {
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "{}";
   try {
-    return json(JSON.parse(text));
+    return json(clean(JSON.parse(text)));
   } catch {
     return json({ reply: text, entries: [], quickReplies: [] });
   }
   },
 };
+
+function clean(o) {
+  const cut = (v, n) => (typeof v === "string" ? v.slice(0, n) : undefined);
+  return {
+    reply: cut(o.reply, 600) || "",
+    quickReplies: (o.quickReplies || []).slice(0, 3).map(q => cut(q, 30)).filter(Boolean),
+    entries: (o.entries || []).slice(0, 5).map(e => ({
+      type: ["apply", "connect", "make", "learn", "rest"].includes(e.type) ? e.type : "apply",
+      title: cut(e.title, 80), company: cut(e.company, 60), role: cut(e.role, 80), region: cut(e.region, 30),
+      insight: cut(e.insight, 200), nextDate: cut(e.nextDate, 10), nextText: cut(e.nextText, 160),
+      keywords: (e.keywords || []).slice(0, 6).map(k => cut(k, 30)).filter(Boolean),
+    })),
+  };
+}
 
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { ...cors, "Content-Type": "application/json" } });
