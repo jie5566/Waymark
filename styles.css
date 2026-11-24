@@ -1,7 +1,7 @@
 :root{
   --bg:#F2F4F7; --surface:#FFFFFF; --ink:#1E2329; --muted:#5E6670; --line:#D5DAE1;
   --blue:#2F5D8C; --orange:#B4561A; --violet:#6B4FA8; --teal:#2C7A6B; --gray:#8A877F;
-  --font:"Avenir Next","Avenir","Nunito Sans","Noto Sans SC","PingFang SC",system-ui,sans-serif;
+  --font:"Nunito Sans","Noto Sans SC","PingFang SC",system-ui,sans-serif;
   --tab-h:64px; --top-h:56px;
 }
 *{box-sizing:border-box}
