@@ -3,9 +3,9 @@
 // and returns structured draft entries for the app to show and the user to confirm.
 // The Gemini key lives only here, as the secret GEMINI_API_KEY.
 
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.6-flash";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.5-flash-lite";
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const GEMINI_THINKING = Deno.env.get("GEMINI_THINKING") ?? "low";
+const GEMINI_THINKING = Deno.env.get("GEMINI_THINKING") ?? "minimal";
 const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 
 const cors = {
@@ -104,18 +104,24 @@ Deno.serve(async (req) => {
     { role: "user", parts: [{ text: message + pageNote }] },
   ];
 
-  const res = await fetch(
+  const gctl = new AbortController();
+  const gtimer = setTimeout(() => gctl.abort(), 25000);
+  let res;
+  try {
+  res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+      signal: gctl.signal,
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt(lang, regions, stats, today, quiet) }] },
         contents,
-        generationConfig: { responseMimeType: "application/json", responseSchema, thinkingConfig: { thinkingLevel: GEMINI_THINKING } },
+        generationConfig: { responseMimeType: "application/json", responseSchema, thinkingConfig: { thinkingLevel: GEMINI_THINKING }, maxOutputTokens: 1200 },
       }),
     },
   );
+  } catch { return json({ error: "timeout" }, 504); } finally { clearTimeout(gtimer); }
   if (!res.ok) return json({ error: "Gemini error", status: res.status, detail: await res.text() }, 502);
 
   const data = await res.json();
@@ -123,7 +129,7 @@ Deno.serve(async (req) => {
   try {
     return json(clean(JSON.parse(text)));
   } catch {
-    return json({ reply: text, entries: [], quickReplies: [] });
+    return json({ error: "parse" }, 502);
   }
 });
 

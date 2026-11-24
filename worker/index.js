@@ -71,8 +71,7 @@ async function fetchPageText(url) {
 export default {
   async fetch(req, env) {
   const GEMINI_KEY = env.GEMINI_API_KEY || "";
-  const GEMINI_MODEL = env.GEMINI_MODEL || "gemini-3.6-flash";
-  const GEMINI_THINKING = env.GEMINI_THINKING || "low";
+  const GEMINI_MODEL = env.GEMINI_MODEL || "gemini-3.5-flash-lite";
   cors = {
     "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
     "Access-Control-Allow-Headers": "content-type",
@@ -102,18 +101,35 @@ export default {
     { role: "user", parts: [{ text: message + pageNote }] },
   ];
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt(lang, regions, stats, today, quiet) }] },
-        contents,
-        generationConfig: { responseMimeType: "application/json", responseSchema, thinkingConfig: { thinkingLevel: GEMINI_THINKING } },
-      }),
-    },
-  );
+  // Try the preferred model first; if Google is busy (429/503) or slow, fall back to the next one.
+  const THINK = { "gemini-3.5-flash-lite": "minimal", "gemini-3.6-flash": "low" };
+  const models = [...new Set([GEMINI_MODEL, "gemini-3.6-flash", "gemini-3.1-flash-lite"])];
+  const deadline = Date.now() + 26000;
+  let res, lastErr = "timeout";
+  for (const model of models) {
+    const left = deadline - Date.now();
+    if (left < 3000) break;
+    const gctl = new AbortController();
+    const gtimer = setTimeout(() => gctl.abort(), Math.min(left, 12000));
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+        signal: gctl.signal,
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt(lang, regions, stats, today, quiet) }] },
+          contents,
+          generationConfig: { responseMimeType: "application/json", responseSchema, maxOutputTokens: 1200,
+            ...(THINK[model] ? { thinkingConfig: { thinkingLevel: THINK[model] } } : {}) },
+        }),
+      });
+    } catch { res = null; lastErr = "timeout"; } finally { clearTimeout(gtimer); }
+    if (res && res.ok) break;
+    if (res && ![429, 500, 503].includes(res.status)) break;
+    if (res) lastErr = "busy " + res.status;
+    res = null;
+  }
+  if (!res) return json({ error: lastErr }, 503);
   if (!res.ok) return json({ error: "Gemini error", status: res.status, detail: await res.text() }, 502);
 
   const data = await res.json();
@@ -121,7 +137,7 @@ export default {
   try {
     return json(clean(JSON.parse(text)));
   } catch {
-    return json({ reply: text, entries: [], quickReplies: [] });
+    return json({ error: "parse" }, 502);
   }
   },
 };
