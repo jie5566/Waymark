@@ -117,7 +117,8 @@
       </div>
       ${top.length ? `<div class="kw"><h3>${esc(t.jd)}</h3>${top.map(([k, n]) => `
         <div class="kw-row"><span>${esc(k)}</span><div class="bar" role="img" aria-label="${esc(t.jdLine(k, n, posts.length))}"><i style="width:${Math.round(100 * n / posts.length)}%"></i></div><span class="muted">${n}</span></div>`).join("")}</div>` : ""}
-      <p class="status-line">${esc(t.status(waiting, interviews))}</p>`;
+      <p class="status-line">${esc(t.status(waiting, interviews))}</p>
+      <p class="byline"><svg viewBox="0 0 789 873" aria-hidden="true"><path d="M330,0 L789,0 L518,873 L360,873 L636,107 L288,107 Z M38,763 L366,763 L330,873 L0,873 Z"/></svg>a Jvision product</p>`;
   }
 
   function renderAll() { renderMapPane(); renderChat(); renderDrafts(); if (document.body.dataset.view === "review") renderReview(); }

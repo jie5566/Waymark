@@ -20,9 +20,10 @@ h3{margin:0;font-size:13px;font-weight:600}
 /* top bar */
 .topbar{height:var(--top-h);display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 20px;border-bottom:1px solid var(--line)}
 .logo{display:flex;align-items:center;min-height:44px}
-.logo{gap:10px;color:var(--ink);text-decoration:none}
-.logo svg{height:22px;fill:var(--ink)}
-.wordmark{font-size:16px;font-weight:600;letter-spacing:.5px}
+.logo{text-decoration:none}
+.logo .lockup{height:24px;width:auto;display:block}
+.byline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.byline svg{height:12px;fill:var(--muted)}
 .topbar-right{display:flex;align-items:center;gap:10px}
 .mode-badge{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:2px 8px}
 .lang{display:flex;gap:2px;border:1px solid var(--line);border-radius:18px;padding:2px}
