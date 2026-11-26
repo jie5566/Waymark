@@ -99,6 +99,14 @@ window.JV = window.JV || {};
     });
   };
 
+  async function post(path, body = {}) {
+    const cfg = window.JV_CONFIG || {};
+    const res = await fetch(cfg.AI_URL.replace(/\/$/, "") + path, {
+      method: "POST", headers: { "Content-Type": "application/json", "x-waymark-token": JV.getToken() }, body: JSON.stringify(body) });
+    if (!res.ok) throw Object.assign(new Error(path + " " + res.status), { status: res.status });
+    return res.json();
+  }
+
   // ---------- settings: access code, sync, backup ----------
   JV.openSettings = function () {
     const t = JV.t(), st = JV.store.state, has = !!JV.getToken();
@@ -126,6 +134,16 @@ window.JV = window.JV || {};
           </div>
           <p class="muted small" id="bk-msg" role="status"></p>
         </section>
+        <section class="set-sec">
+          <h3>${esc(t.usageTitle)}</h3>
+          <p class="muted small" id="usage-msg" role="status">${esc(has ? t.usageLoading : t.usageNeedsToken)}</p>
+        </section>
+        <section class="set-sec">
+          <h3>${esc(t.wipeTitle)}</h3>
+          <p class="muted small">${esc(t.wipeLead)}</p>
+          <div class="row"><button class="btn" id="wipe">${esc(t.wipeBtn)}</button></div>
+          <p class="muted small" id="wipe-msg" role="status"></p>
+        </section>
       </div>`, () => JV.refresh && JV.refresh());
 
     if (JV.renderJobSettings) JV.renderJobSettings($("#set-jobs"));
@@ -143,6 +161,23 @@ window.JV = window.JV || {};
       const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
       a.download = `waymark-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    // AI usage, from the Worker's usage log.
+    if (JV.syncEnabled && JV.syncEnabled()) post("/usage").then(u => {
+      const n = v => Number(v || 0).toLocaleString(), el = $("#usage-msg"); if (!el) return;
+      el.innerHTML = [t.usageToday(u.today.calls, u.limit), t.usageMonth(u.month.calls, n(u.month.total)),
+        t.usageJobs(u.jobsMonth.calls, n(u.jobsMonth.total))].map(esc).join("<br>");
+    }).catch(() => { const m = $("#usage-msg"); if (m) m.textContent = t.usageFailed; });
+
+    // Delete all data: cloud first (when synced), then this device. Two taps.
+    const wipe = $("#wipe");
+    wipe.addEventListener("click", async () => {
+      if (!wipe.dataset.confirm) { wipe.dataset.confirm = "1"; wipe.textContent = t.wipeConfirm; return; }
+      const m = $("#wipe-msg"); wipe.disabled = true; m.textContent = t.wipeWorking;
+      try {
+        if (JV.syncEnabled && JV.syncEnabled()) await post("/account/delete", { confirm: "DELETE" });
+        JV.store.wipeLocal(); location.reload();
+      } catch { wipe.disabled = false; m.textContent = t.wipeFailed; }
     });
     $("#bk-import").addEventListener("change", async ev => {
       const file = ev.target.files[0]; if (!file) return; const m = $("#bk-msg");

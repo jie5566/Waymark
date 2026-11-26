@@ -11,52 +11,33 @@ index.html              App 外壳（顶栏、地图、记录、回看、手机�
 styles.css              样式；冷色调；≥900px 宽为电脑布局（左地图 + 右侧栏）
 config.js               填 AI 接口地址；留空 = 演示模式（不接 AI）
 js/i18n.js              三语文案（英文和瑞典语上线前请母语者校对）
-js/store.js             数据：只存在本机浏览器（localStorage），隐私友好
+js/store.js             数据：先存本机浏览器，设好访问口令后同步到 Cloudflare D1（欧盟区）
 js/map.js               用代码生成的地形、迷雾和地图元素
 js/ai.js                调用后端；未配置时用内置的简单回复
 js/app.js               对话、草稿卡片、每周回看
 js/jobs.js              今日发现：每天从 Platsbanken 挑几个贴合的职位，“我申请了”直接进入记录对话
 worker/jobs.js          后端：每天定时抓取、AI 分析、打分（见 worker/README.md）
+worker/index.js         后端（Cloudflare Worker）：保管 Gemini 密钥，读取职位链接，返回结构化的记录草稿；云同步；删除全部数据
+worker/usage.js         AI 用量记录（每次调用的 token 数）和每日上限
 worker/companies.js     关注的公司：识别招聘系统（Teamtailor / Greenhouse / Lever / Ashby），读官网职位
-supabase/functions/ai-followup/index.ts
-                        后端：保管 Gemini 密钥，读取职位链接，返回结构化的记录草稿
 ```
 
 ## 数据怎么流动
 
 1. 你在“记录”里贴链接或打字。
-2. 前端把消息、最近的对话、已有的区域和本周数字发给 Supabase 函数。
-3. 函数尝试读取链接页面（需要登录的页面读不到，AI 会改为直接问公司和岗位），再调用 Gemini，要求它按固定的 JSON 格式返回：一句回复、0–3 个快捷回答、若干条记录草稿。
+2. 前端把消息、最近的对话、已有的区域和本周数字发给 Cloudflare Worker。
+3. Worker 尝试读取链接页面（需要登录的页面读不到，AI 会改为直接问公司和岗位），再调用 Gemini，要求它按固定的 JSON 格式返回：一句回复、0–3 个快捷回答、若干条记录草稿。
 4. 草稿出现在对话上方的卡片里，可以直接点文字修改，确认“保存”后才算数，地图随之生长。
 
-## 接上 Gemini（大约 15 分钟）
+## 后端设置（Cloudflare）
 
-需要：Supabase 账号、[Supabase CLI](https://supabase.com/docs/guides/cli)、一个 Gemini API 密钥（在 Google AI Studio 里创建）。
+Worker 在每次推送到 `main` 后由 Cloudflare 自动部署，详见 `worker/README.md`。在 Cloudflare 后台设置：
 
-```bash
-# 1. 登录并关联项目（把 <project-ref> 换成你的项目 ID）
-supabase login
-supabase link --project-ref <project-ref>
+- `GEMINI_API_KEY`（秘密变量）：Gemini 密钥，只存在服务器上，绝对不要放进前端代码。
+- `APP_TOKEN`（秘密变量，**必须设置**）：访问口令。没有设置时 Worker 拒绝所有请求，这样 AI 额度不会被别人用掉。
+- 可选：`GEMINI_MODEL`、`ALLOWED_ORIGIN`（默认 `https://jie5566.github.io`）、`DAILY_AI_LIMIT`（每天最多几次 AI 对话，默认 150）。
 
-# 2. 把 Gemini 密钥存成后端的秘密变量（只存在服务器上，不会进浏览器）
-supabase secrets set GEMINI_API_KEY=你的密钥
-# 可选：换模型，默认 gemini-3.6-flash
-supabase secrets set GEMINI_MODEL=gemini-3.6-flash
-
-# 3. 部署函数
-supabase functions deploy ai-followup
-```
-
-然后在 `config.js` 里填：
-
-```js
-AI_URL: "https://<project-ref>.supabase.co/functions/v1/ai-followup",
-SUPABASE_ANON_KEY: "<项目的 publishable / anon key>",
-```
-
-publishable（anon）key 可以放在浏览器里，Gemini 密钥绝对不要放进前端代码。
-
-正式上线前，建议在函数的秘密变量里设置 `ALLOWED_ORIGIN` 为你的网址，并在 Supabase 里加上调用频率限制，防止别人盗用你的额度。
+设置 → AI 用量 里可以看到今天和本月的调用次数和 token 数。
 
 ## 本地运行 / 发布
 

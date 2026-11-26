@@ -21,8 +21,7 @@ window.JV = window.JV || {};
     const res = await fetch(cfg.AI_URL, {
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json" },
-        JV.getToken() ? { "x-waymark-token": JV.getToken() } : {},
-        cfg.SUPABASE_ANON_KEY ? { Authorization: `Bearer ${cfg.SUPABASE_ANON_KEY}`, apikey: cfg.SUPABASE_ANON_KEY } : {}),
+        JV.getToken() ? { "x-waymark-token": JV.getToken() } : {}),
       body: JSON.stringify(payload),
     });
     if (!res.ok) { const e = new Error("AI " + res.status); e.status = res.status; throw e; }

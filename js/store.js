@@ -161,6 +161,10 @@ window.JV = window.JV || {};
       if (n) { migrate(); save(); }
       return n;
     },
+    // Delete everything this app keeps in this browser (the access code stays, so the app still works).
+    wipeLocal() {
+      try { for (const k of Object.keys(localStorage)) if (k.startsWith("waymark.") && k !== "waymark.token") localStorage.removeItem(k); } catch { /* storage off */ }
+    },
     importJSON(obj) {
       if (!obj || obj.app !== "waymark" || !Array.isArray(obj.entries)) throw new Error("not a Waymark backup");
       if (obj.startedAt && Date.parse(obj.startedAt) < Date.parse(state.startedAt)) state.startedAt = obj.startedAt;
