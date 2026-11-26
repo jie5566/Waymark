@@ -98,19 +98,25 @@ window.JV = window.JV || {};
       g.appendChild(el("path", { d: `M${START.x},${START.y} Q${(START.x + G.h.x) / 2 + 40},${(START.y + G.h.y) / 2} ${G.h.x},${G.h.y}`, stroke: C.blue, "stroke-width": 2.4, fill: "none", "stroke-linecap": "round", opacity: 0.85 }));
       G.list.forEach((e, i) => {
         const p = place(e, G.h, G.R, i, G.list.length), isToday = new Date(e.date).toDateString() === today;
-        if (isToday) g.appendChild(el("circle", { cx: p.x, cy: p.y, r: 22, fill: "none", stroke: C.blue, "stroke-width": 1.4, opacity: 0.45 }));
         if (e.type === "apply") {
           g.appendChild(el("path", { d: `M${G.h.x},${G.h.y} Q${(G.h.x + p.x) / 2 + 18},${(G.h.y + p.y) / 2 - 10} ${p.x},${p.y}`, stroke: C.blue, "stroke-width": 2, fill: "none", "stroke-linecap": "round" }));
-          g.appendChild(el("circle", { cx: p.x, cy: p.y, r: 5, fill: C.blue }));
-        } else if (e.type === "connect") {
-          g.appendChild(el("circle", { cx: p.x, cy: p.y, r: 8, fill: C.bg, stroke: C.orange, "stroke-width": 2.4 }));
-        } else if (e.type === "make") {
-          g.appendChild(el("rect", { x: p.x - 7, y: p.y - 7, width: 14, height: 14, rx: 2, fill: C.violet }));
-        } else if (e.type === "learn") {
-          g.appendChild(el("path", { d: `M${p.x},${p.y - 10} L${p.x + 8},${p.y + 7} L${p.x - 8},${p.y + 7} Z`, fill: "none", stroke: C.teal, "stroke-width": 2.2, "stroke-linejoin": "round" }));
-        } else {
-          g.appendChild(el("path", { d: `M${p.x - 9},${p.y + 6} L${p.x},${p.y - 8} L${p.x + 9},${p.y + 6} Z`, fill: C.gray }));
         }
+        // Each marker is a focusable group, so hover, tap or keyboard can open its card.
+        const m = el("g", { class: "hit", tabindex: 0, role: "button", "data-eid": e.id, "aria-label": e.title || e.type });
+        m.appendChild(el("circle", { cx: p.x, cy: p.y, r: 20, fill: "transparent" }));
+        if (isToday) m.appendChild(el("circle", { class: "ring", cx: p.x, cy: p.y, r: 22, fill: "none", stroke: C.blue, "stroke-width": 1.4, opacity: 0.45 }));
+        if (e.type === "apply") {
+          m.appendChild(el("circle", { cx: p.x, cy: p.y, r: 5, fill: C.blue }));
+        } else if (e.type === "connect") {
+          m.appendChild(el("circle", { cx: p.x, cy: p.y, r: 8, fill: C.bg, stroke: C.orange, "stroke-width": 2.4 }));
+        } else if (e.type === "make") {
+          m.appendChild(el("rect", { x: p.x - 7, y: p.y - 7, width: 14, height: 14, rx: 2, fill: C.violet }));
+        } else if (e.type === "learn") {
+          m.appendChild(el("path", { d: `M${p.x},${p.y - 10} L${p.x + 8},${p.y + 7} L${p.x - 8},${p.y + 7} Z`, fill: "none", stroke: C.teal, "stroke-width": 2.2, "stroke-linejoin": "round" }));
+        } else {
+          m.appendChild(el("path", { d: `M${p.x - 9},${p.y + 6} L${p.x},${p.y - 8} L${p.x + 9},${p.y + 6} Z`, fill: C.gray }));
+        }
+        g.appendChild(m);
       });
       g.appendChild(el("circle", { cx: G.h.x, cy: G.h.y, r: 4, fill: C.ink }));
       g.appendChild(el("text", { x: G.h.x, y: G.h.y - G.R - 14, "text-anchor": "middle", fill: C.ink, "font-size": 22, "letter-spacing": 2, "font-family": "inherit" }, G.r.name));
@@ -120,5 +126,47 @@ window.JV = window.JV || {};
     const fy = Math.min(...[START.y, ...geo.map(x => x.h.y - x.R)]) - 90;
     g.appendChild(el("text", { x: START.x - 260, y: fy, fill: C.muted, "font-size": 18, "letter-spacing": 2, "font-family": "inherit" }, t.fog));
     svg.appendChild(g);
+    bindTips(svg);
   };
+
+  // ---- entry card (tooltip) ----
+  const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  JV.entryCard = function (e) {
+    const t = JV.t(), date = t.dateFmt(new Date(e.date));
+    const meta = [t.types[e.type], e.roleType && t.roles[e.roleType], e.seniority && t.seniorityL[e.seniority], date].filter(Boolean).join(" · ");
+    let html = `<div class="tip-title">${esc(e.title || [e.role, e.company].filter(Boolean).join(" · "))}</div><div class="tip-meta">${esc(meta)}</div>`;
+    if (e.type === "apply") {
+      const f = e.focus ? JV.DIMS.filter(d => e.focus[d] > 0).sort((a, b) => e.focus[b] - e.focus[a]) : [];
+      if (f.length) html += `<div><div class="tip-meta">${esc(t.focusLabel)}</div>` + f.map(d => `<div class="fbar"><span>${esc(t.dimShort[d])}</span><span class="track"><i style="width:${Math.round(e.focus[d] / 3 * 100)}%"></i></span><span>${e.focus[d]}</span></div>`).join("") + `</div>`;
+      if (e.skills?.length) html += `<div><div class="tip-meta">${esc(t.skillsLabel)}</div><div class="chips">${e.skills.map(k => `<span>${esc(k)}</span>`).join("")}</div></div>`;
+      if (!f.length && !e.skills?.length) html += `<div class="tip-meta">${esc(t.noProfile)}</div>`;
+    }
+    if (e.insight) html += `<div>${esc(e.insight)}</div>`;
+    return html;
+  };
+
+  let pinned = null;
+  function bindTips(svg) {
+    const tip = document.getElementById("tip"), wrap = svg.parentElement;
+    const show = (node, pin) => {
+      const e = JV.store.state.entries.find(x => x.id === node.dataset.eid); if (!e) return;
+      tip.innerHTML = JV.entryCard(e); tip.hidden = false; tip.classList.toggle("pinned", !!pin);
+      const r = node.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      let x = r.left - w.left + r.width / 2 - tw / 2, y = r.top - w.top - th - 10;
+      if (y < 8) y = r.bottom - w.top + 10;
+      x = Math.max(8, Math.min(x, w.width - tw - 8));
+      tip.style.left = x + "px"; tip.style.top = Math.min(y, w.height - th - 8) + "px";
+    };
+    const hide = () => { if (!pinned) tip.hidden = true; };
+    svg.querySelectorAll(".hit").forEach(n => {
+      n.addEventListener("pointerenter", ev => { if (ev.pointerType === "mouse" && !pinned) show(n); });
+      n.addEventListener("pointerleave", hide);
+      n.addEventListener("focus", () => show(n));
+      n.addEventListener("blur", hide);
+      n.addEventListener("click", ev => { ev.stopPropagation(); pinned = pinned === n.dataset.eid ? null : n.dataset.eid; if (pinned) show(n, true); else tip.hidden = true; });
+      n.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); n.dispatchEvent(new MouseEvent("click")); } if (ev.key === "Escape") { pinned = null; tip.hidden = true; } });
+    });
+    svg.onclick = () => { pinned = null; tip.hidden = true; };
+  }
 })();

@@ -20,9 +20,11 @@
   // ---------- navigation ----------
   function go(view) {
     document.body.dataset.view = view;
+    const tip = document.getElementById("tip"); if (tip) tip.hidden = true;
     $$("[data-go]").forEach(b => b.setAttribute("aria-current", b.dataset.go === view || (view === "map" && b.closest(".side-tabs") && b.dataset.go === "log") ? "page" : "false"));
     if (view === "map") requestAnimationFrame(() => JV.renderMap($("#map")));
     if (view === "review") renderReview();
+    if (view === "skills") renderSkills();
     if (location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
   }
   $$("[data-go]").forEach(b => b.addEventListener("click", () => go(b.dataset.go)));
@@ -116,8 +118,8 @@
     const newRegion = st.regions.find(r => new Date(r.createdAt).getTime() >= since);
     const c = k => week.filter(e => e.type === k).length;
     const notes = week.filter(e => e.insight).slice(-4).reverse();
-    const kw = {}, posts = st.entries.filter(e => e.type === "apply" && e.keywords?.length);
-    posts.forEach(e => new Set(e.keywords).forEach(k => kw[k] = (kw[k] || 0) + 1));
+    const kw = {}, posts = st.entries.filter(e => e.type === "apply" && (e.skills?.length || e.keywords?.length));
+    posts.forEach(e => new Set(e.skills?.length ? e.skills : e.keywords).forEach(k => kw[k] = (kw[k] || 0) + 1));
     const top = Object.entries(kw).sort((a, b) => b[1] - a[1]).slice(0, 4);
     const waiting = st.entries.filter(e => e.status === "waiting").length, interviews = st.entries.filter(e => e.status === "interview").length;
     const a = new Date(since + 864e5), b = new Date();
@@ -139,9 +141,49 @@
       <p class="byline"><svg viewBox="0 0 789 873" aria-hidden="true"><path d="M330,0 L789,0 L518,873 L360,873 L636,107 L288,107 Z M38,763 L366,763 L330,873 L0,873 Z"/></svg>a Jvision product</p>`;
   }
 
-  function renderAll() { renderMapPane(); renderChat(); renderDrafts(); if (document.body.dataset.view === "review") renderReview(); }
+  // ---------- skills matrix ----------
+  function renderSkills() {
+    const t = JV.t(), D = JV.DIMS, box = $("#view-skills");
+    const jobs = st.entries.filter(e => e.type === "apply" && e.focus).sort((a, b) => b.date.localeCompare(a.date));
+    if (!jobs.length) { box.innerHTML = `<div><h2>${esc(t.skillsTitle)}</h2></div><p class="empty">${esc(t.skillsEmpty)}</p>`; return; }
+    const avg = list => Object.fromEntries(D.map(d => [d, list.reduce((s, e) => s + (e.focus[d] || 0), 0) / list.length]));
+    const all = avg(jobs), order = [...D].sort((a, b) => all[b] - all[a]);
+    const bar = (d, v) => `<div class="fbar"><span>${esc(t.dims[d])}</span><span class="track"><i style="width:${Math.round(v / 3 * 100)}%"></i></span><span>${v.toFixed(1)}</span></div>`;
+    const cut = Date.now() - 30 * 864e5;
+    const recent = jobs.filter(e => new Date(e.date).getTime() >= cut), older = jobs.filter(e => new Date(e.date).getTime() < cut);
+    let trend = `<p class="empty">${esc(t.trendNeed)}</p>`;
+    if (recent.length >= 2 && older.length >= 2) {
+      const a = avg(recent), b = avg(older);
+      trend = order.map(d => { const dv = a[d] - b[d], cls = dv > 0.2 ? "delta-up" : dv < -0.2 ? "delta-down" : "muted";
+        return `<div class="fbar"><span>${esc(t.dims[d])}</span><span class="track"><i style="width:${Math.round(a[d] / 3 * 100)}%"></i></span><span class="${cls}">${dv > 0 ? "+" : ""}${dv.toFixed(1)}</span></div>`; }).join("");
+    }
+    const shade = v => ["transparent", "#E3EBF4", "#A9C1DD", "#2F5D8C"][v || 0], ink = v => (v === 3 ? "#FFFFFF" : "#1E2329");
+    const rows = jobs.map(e => `<tr><td class="job" title="${esc(e.title)}">${esc(e.company || e.title)}<br><span class="muted small">${esc(e.roleType ? t.roles[e.roleType] : e.role || "")}</span></td>${D.map(d => `<td class="c" style="background:${shade(e.focus[d])};color:${ink(e.focus[d])}">${e.focus[d] || ""}</td>`).join("")}</tr>`).join("");
+    const freq = {}; jobs.forEach(e => new Set(e.skills || []).forEach(k => freq[k] = (freq[k] || 0) + 1));
+    const top = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    box.innerHTML = `
+      <div><h2>${esc(t.skillsTitle)}</h2><span class="muted small">${esc(t.skillsLead(jobs.length))}</span></div>
+      <section><h3>${esc(t.avgProfile)}</h3>${order.map(d => bar(d, all[d])).join("")}</section>
+      <section><h3>${esc(t.trend)}</h3>${trend}</section>
+      <section><h3>${esc(t.matrix)}</h3><div class="mx-wrap"><table class="mx"><thead><tr><th></th>${D.map(d => `<th title="${esc(t.dims[d])}">${esc(t.dimShort[d])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>
+      ${top.length ? `<section><h3>${esc(t.topSkills)}</h3><div class="chips">${top.map(([k, n]) => `<span>${esc(k)} · ${n}</span>`).join("")}</div></section>` : ""}
+      <div><button class="btn" id="csv">${esc(t.exportCsv)}</button></div>`;
+    $("#csv").addEventListener("click", exportCsv);
+  }
+  function exportCsv() {
+    const D = JV.DIMS, q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const head = ["date", "company", "role", "title", "roleType", "seniority", "region", ...D, "skills", "status"];
+    const lines = st.entries.filter(e => e.type === "apply").map(e => [e.date.slice(0, 10), e.company, e.role, e.title, e.roleType, e.seniority,
+      st.regions.find(r => r.id === e.regionId)?.name, ...D.map(d => e.focus?.[d] ?? ""), (e.skills || []).join("; "), e.status].map(q).join(","));
+    const blob = new Blob(["\ufeff" + [head.join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `waymark-jobs-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function renderAll() { renderMapPane(); renderChat(); renderDrafts(); const v = document.body.dataset.view; if (v === "review") renderReview(); if (v === "skills") renderSkills(); }
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
 
   applyLang();
-  go(["map", "log", "review"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "map");
+  window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (["map", "log", "review", "skills"].includes(h) && h !== document.body.dataset.view) go(h); });
+  go(["map", "log", "review", "skills"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "map");
 })();

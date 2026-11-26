@@ -33,7 +33,7 @@
       <h1 id="map-title" data-i18n="mapTitle"></h1>
       <p class="muted" id="map-sub"></p>
     </div>
-    <div class="map-wrap"><svg id="map" role="img"></svg></div>
+    <div class="map-wrap"><svg id="map" role="img"></svg><div class="tip" id="tip" role="tooltip" hidden></div></div>
     <div class="legend" id="legend"></div>
   </section>
 
@@ -42,6 +42,7 @@
     <nav class="side-tabs" aria-label="Sections">
       <button data-go="log" data-i18n="tabLog"></button>
       <button data-go="review" data-i18n="tabReview"></button>
+      <button data-go="skills" data-i18n="tabSkills"></button>
     </nav>
 
     <section class="view-log" id="view-log" aria-label="Log">
@@ -75,6 +76,7 @@
     </section>
 
     <section class="view-review" id="view-review" aria-label="Review"></section>
+    <section class="view-skills" id="view-skills" aria-label="Skills"></section>
   </aside>
 </main>
 
@@ -83,6 +85,7 @@
   <button data-go="map" data-i18n="tabMap"></button>
   <button data-go="log" data-i18n="tabLog"></button>
   <button data-go="review" data-i18n="tabReview"></button>
+  <button data-go="skills" data-i18n="tabSkills"></button>
 </nav>
 
 <script src="config.js"></script>

@@ -11,6 +11,7 @@ window.JV = window.JV || {};
   const uid = () => Math.random().toString(36).slice(2, 10);
   const norm = s => (s || "").trim().toLowerCase();
 
+  JV.DIMS = ["ux", "ui", "research", "product", "ai", "code", "systems", "brand"];
   JV.store = {
     state, save, uid,
     // Find a region by name, or create it (so the map grows a new area).
@@ -28,6 +29,8 @@ window.JV = window.JV || {};
           company: d.company || "", role: d.role || "", regionId: r.id, insight: d.insight || "",
           next: d.nextText ? { date: d.nextDate || "", text: d.nextText } : null,
           keywords: d.keywords || [], status: d.type === "apply" ? "waiting" : null,
+          roleType: d.roleType || "", seniority: d.seniority || "",
+          skills: d.skills?.length ? d.skills : (d.keywords || []), focus: d.focus || null,
         });
       }
       save();
