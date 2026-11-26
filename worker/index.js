@@ -145,7 +145,8 @@ export default {
   try {
     return json(clean(JSON.parse(text)));
   } catch {
-    return json({ error: "parse" }, 502);
+    // Keep a short sample to see what went wrong (truncation, extra text, ...).
+    return json({ error: "parse", finish: data?.candidates?.[0]?.finishReason, sample: text.slice(0, 400), tail: text.slice(-200) }, 502);
   }
   },
 };
