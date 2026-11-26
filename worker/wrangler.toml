@@ -3,3 +3,9 @@ main = "index.js"
 compatibility_date = "2026-11-01"
 # Keep variables set in the Cloudflare dashboard (secrets like GEMINI_API_KEY and APP_TOKEN are kept either way).
 keep_vars = true
+
+# Cloud sync storage (D1, data kept in the EU). The table is created by the Worker on first sync.
+[[d1_databases]]
+binding = "DB"
+database_name = "waymark"
+database_id = "b31f9e1c-79fb-497f-9f0f-a72ae0199924"

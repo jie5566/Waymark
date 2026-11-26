@@ -87,11 +87,13 @@ export default {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
   // Private use: only requests carrying the access code (secret APP_TOKEN) are served.
   if (env.APP_TOKEN && req.headers.get("x-waymark-token") !== env.APP_TOKEN) return json({ error: "unauthorized" }, 401);
+  if (new URL(req.url).pathname === "/sync") return handleSync(req, env);
   if (!GEMINI_KEY) return json({ error: "GEMINI_API_KEY is not set" }, 500);
 
   let body;
   try { body = await req.json(); } catch { return json({ error: "Bad JSON" }, 400); }
-  const { message = "", history = [], lang = "zh", regions = [], stats = {}, today = "", quiet = false } = body;
+  const { message = "", history = [], lang = "zh", regions = [], stats = {}, today = "", mode = "chat" } = body;
+  const quiet = mode === "analyze" ? true : !!body.quiet;
   if (typeof message !== "string" || !message.trim()) return json({ error: "Bad message" }, 400);
   // Long pastes (a whole job description) are fine: keep the first 12,000 characters.
   const msg = message.slice(0, 12000);
@@ -115,8 +117,9 @@ export default {
   const THINK = { "gemini-3.5-flash-lite": "minimal", "gemini-3.6-flash": "low" };
   const models = [...new Set([GEMINI_MODEL, "gemini-3.6-flash", "gemini-3.1-flash-lite"])];
   const deadline = Date.now() + 26000;
-  let res, lastErr = "timeout";
+  let res, lastErr = "timeout", usedModel = "";
   for (const model of models) {
+    usedModel = model;
     const left = deadline - Date.now();
     if (left < 3000) break;
     const gctl = new AbortController();
@@ -127,7 +130,7 @@ export default {
         headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
         signal: gctl.signal,
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt(lang, regions, stats, today, quiet) }] },
+          systemInstruction: { parts: [{ text: systemPrompt(lang, regions, stats, today, quiet) + (mode === "analyze" ? ANALYZE_NOTE : "") }] },
           contents,
           generationConfig: { responseMimeType: "application/json", responseSchema, maxOutputTokens: 1200,
             ...(THINK[model] ? { thinkingConfig: { thinkingLevel: THINK[model] } } : {}) },
@@ -145,13 +148,53 @@ export default {
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "{}";
   try {
-    return json(clean(JSON.parse(text)));
+    return json({ ...clean(JSON.parse(text)), model: usedModel, analysisVersion: 2 });
   } catch {
     // Keep a short sample to see what went wrong (truncation, extra text, ...).
     return json({ error: "parse", finish: data?.candidates?.[0]?.finishReason, sample: text.slice(0, 400), tail: text.slice(-200) }, 502);
   }
   },
 };
+
+const ANALYZE_NOTE = "\n\nThis turn is a re-analysis of a job post the user already logged. Return exactly one apply entry with its full profile (roleType, seniority, focus, skills). Reply with one short sentence and no question.";
+
+// ---------- cloud sync (D1) ----------
+// One table of items (entries and regions). For each id the copy with the newer updatedAt wins.
+// server_ts orders changes, so each device asks only for what changed since its last sync.
+async function handleSync(req, env) {
+  if (!env.APP_TOKEN) return json({ error: "sync needs APP_TOKEN" }, 403);
+  if (!env.DB) return json({ error: "no database bound" }, 503);
+  let body;
+  try { body = await req.json(); } catch { return json({ error: "Bad JSON" }, 400); }
+  const since = Number(body.since) || 0;
+  const items = Array.isArray(body.items) ? body.items.slice(0, 500) : [];
+  const db = env.DB;
+  await db.batch([
+    db.prepare("CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, kind TEXT NOT NULL, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, data TEXT, server_ts INTEGER NOT NULL)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS items_ts ON items (server_ts)"),
+  ]);
+  const ts = Date.now();
+  const writes = [];
+  for (const it of items) {
+    if (typeof it.id !== "string" || !["entry", "region"].includes(it.kind)) continue;
+    const data = it.deleted ? null : JSON.stringify(it.data ?? null);
+    if (data && data.length > 100000) continue;
+    writes.push(db.prepare(
+      "INSERT INTO items (id, kind, updated_at, deleted, data, server_ts) VALUES (?1, ?2, ?3, ?4, ?5, ?6) " +
+      "ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, updated_at = excluded.updated_at, deleted = excluded.deleted, data = excluded.data, server_ts = excluded.server_ts " +
+      "WHERE excluded.updated_at > items.updated_at"
+    ).bind(it.id.slice(0, 64), it.kind, Number(it.updatedAt) || ts, it.deleted ? 1 : 0, data, ts));
+  }
+  if (writes.length) await db.batch(writes);
+  const { results } = await db.prepare("SELECT id, kind, updated_at, deleted, data, server_ts FROM items WHERE server_ts > ?1 ORDER BY server_ts LIMIT 2000").bind(since).all();
+  const maxTs = results.reduce((m, r) => Math.max(m, r.server_ts), since);
+  // Step the cursor back a few seconds so a write landing in the same instant is never missed (repeats are harmless).
+  const cursor = Math.max(since, Math.min(maxTs, Date.now() - 5000));
+  return json({
+    cursor,
+    items: results.map(r => ({ kind: r.kind, id: r.id, updatedAt: r.updated_at, deleted: !!r.deleted, data: r.data ? JSON.parse(r.data) : null })),
+  });
+}
 
 function clean(o) {
   const cut = (v, n) => (typeof v === "string" ? v.slice(0, n) : undefined);

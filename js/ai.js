@@ -1,4 +1,4 @@
-// Talks to the Supabase function that holds the Gemini key.
+// Talks to the Waymark Worker (Cloudflare) that holds the Gemini key.
 // With no AI_URL configured, it runs a small built-in demo so the app still works.
 window.JV = window.JV || {};
 (function () {
@@ -8,11 +8,11 @@ window.JV = window.JV || {};
   JV.getToken = () => { try { return localStorage.getItem("waymark.token") || ""; } catch { return ""; } };
   JV.setToken = v => { try { localStorage.setItem("waymark.token", v); } catch { /* storage off */ } };
 
-  JV.ask = async function (message) {
+  JV.ask = async function (message, opts = {}) {
     const s = JV.store.state;
     const payload = {
-      message, lang: s.lang, quiet: s.quiet,
-      history: s.chat.slice(-10).map(m => ({ role: m.role, text: m.text })),
+      message, lang: s.lang, quiet: opts.mode === "analyze" ? true : s.quiet, mode: opts.mode || "chat",
+      history: opts.mode === "analyze" ? [] : s.chat.slice(-10).map(m => ({ role: m.role, text: m.text })),
       regions: s.regions.map(r => r.name),
       stats: JV.store.stats(7),
       today: new Date().toISOString().slice(0, 10),
@@ -27,8 +27,10 @@ window.JV = window.JV || {};
     });
     if (!res.ok) { const e = new Error("AI " + res.status); e.status = res.status; throw e; }
     const data = await res.json();
-    return { reply: data.reply || "", quickReplies: data.quickReplies || [], entries: data.entries || [] };
+    return { reply: data.reply || "", quickReplies: data.quickReplies || [], entries: data.entries || [], model: data.model || "" };
   };
+  // Re-run the skill analysis on a job post that is already saved.
+  JV.analyze = text => JV.ask(text, { mode: "analyze" });
 
   // ---- demo mode: keyword rules, no AI ----
   const RULES = [

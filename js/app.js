@@ -59,7 +59,12 @@
     try {
       const r = await JV.ask(text);
       if (r.reply) st.chat.push({ role: "ai", text: r.reply });
-      if (r.entries?.length) { drafts = drafts.concat(r.entries); }
+      if (r.entries?.length) {
+        // Keep the job post as pasted (and its link) with the record, so it can be re-read and re-analysed later.
+        const url = text.match(/https?:\/\/\S+/)?.[0] || "";
+        drafts = drafts.concat(r.entries.map(d => d.type === "apply"
+          ? { ...d, source: { url, text: text.slice(0, 12000) }, _meta: { model: r.model } } : d));
+      }
       setQuick(r.quickReplies);
     } catch (err) {
       if (err.status === 401) {
@@ -86,6 +91,7 @@
   $("#token-form").addEventListener("submit", e => {
     e.preventDefault(); const v = $("#token-input").value.trim(); if (!v) return;
     JV.setToken(v); $("#token-input").value = ""; $("#token-form").hidden = true;
+    JV.sync && JV.sync({ force: true }).then(r => r.received && renderAll()).catch(() => {});
     if ($("#msg").value.trim()) $("#composer").requestSubmit();
   });
 
@@ -96,6 +102,7 @@
     $("#drafts-title").textContent = t.drafts(drafts.length);
     $("#drafts-list").innerHTML = drafts.map((d, i) => `
       <div class="draft">
+        ${(() => { const dup = d.type === "apply" && S.findDuplicate(d); return dup ? `<p class="dup">${esc(t.dupWarn(t.dateFmt(new Date(dup.date))))}</p>` : ""; })()}
         <div class="draft-row"><span class="chip ${esc(d.type)}">${esc(t.types[d.type] || d.type)}</span>
           <span class="draft-title" contenteditable="true" data-i="${i}" data-k="title">${esc(d.title || [d.role, d.company].filter(Boolean).join(" · "))}</span></div>
         ${d.region ? `<div class="field"><span>${esc(t.fArea)}</span><span contenteditable="true" data-i="${i}" data-k="region">${esc(d.region)}</span></div>` : ""}
@@ -138,8 +145,17 @@
       ${top.length ? `<div class="kw"><h3>${esc(t.jd)}</h3>${top.map(([k, n]) => `
         <div class="kw-row"><span>${esc(k)}</span><div class="bar" role="img" aria-label="${esc(t.jdLine(k, n, posts.length))}"><i style="width:${Math.round(100 * n / posts.length)}%"></i></div><span class="muted">${n}</span></div>`).join("")}</div>` : ""}
       <p class="status-line">${esc(t.status(waiting, interviews))}</p>
+      <section class="records"><h3>${esc(t.allRecords(st.entries.length))}</h3>
+        ${st.entries.length ? [...st.entries].sort((x, y) => y.date.localeCompare(x.date)).map(e => `
+          <button class="rec" data-open="${esc(e.id)}"><span class="chip ${esc(e.type)}">${esc(t.types[e.type])}</span>
+            <span class="rec-title">${esc(e.title || [e.role, e.company].filter(Boolean).join(" · ") || "—")}</span>
+            <span class="muted small">${esc(t.dateFmt(new Date(e.date)))}${e.status && e.status !== "waiting" ? " · " + esc(t.statusL[e.status]) : ""}</span></button>`).join("") : `<p class="empty">${esc(t.noRecords)}</p>`}
+      </section>
       <p class="byline"><svg viewBox="0 0 789 873" aria-hidden="true"><path d="M330,0 L789,0 L518,873 L360,873 L636,107 L288,107 Z M38,763 L366,763 L330,873 L0,873 Z"/></svg>a Jvision product</p>`;
+    bindOpen($("#view-review"));
   }
+
+  function bindOpen(root) { root.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => JV.openEntry(b.dataset.open))); }
 
   // ---------- skills matrix ----------
   function renderSkills() {
@@ -158,7 +174,7 @@
         return `<div class="fbar"><span>${esc(t.dims[d])}</span><span class="track"><i style="width:${Math.round(a[d] / 3 * 100)}%"></i></span><span class="${cls}">${dv > 0 ? "+" : ""}${dv.toFixed(1)}</span></div>`; }).join("");
     }
     const shade = v => ["transparent", "#E3EBF4", "#A9C1DD", "#2F5D8C"][v || 0], ink = v => (v === 3 ? "#FFFFFF" : "#1E2329");
-    const rows = jobs.map(e => `<tr><td class="job" title="${esc(e.title)}">${esc(e.company || e.title)}<br><span class="muted small">${esc(e.roleType ? t.roles[e.roleType] : e.role || "")}</span></td>${D.map(d => `<td class="c" style="background:${shade(e.focus[d])};color:${ink(e.focus[d])}">${e.focus[d] || ""}</td>`).join("")}</tr>`).join("");
+    const rows = jobs.map(e => `<tr data-open="${esc(e.id)}" tabindex="0"><td class="job" title="${esc(e.title)}">${esc(e.company || e.title)}<br><span class="muted small">${esc(e.roleType ? t.roles[e.roleType] : e.role || "")}</span></td>${D.map(d => `<td class="c" style="background:${shade(e.focus[d])};color:${ink(e.focus[d])}">${e.focus[d] || ""}</td>`).join("")}</tr>`).join("");
     const freq = {}; jobs.forEach(e => new Set(e.skills || []).forEach(k => freq[k] = (freq[k] || 0) + 1));
     const top = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 12);
     box.innerHTML = `
@@ -169,12 +185,14 @@
       ${top.length ? `<section><h3>${esc(t.topSkills)}</h3><div class="chips">${top.map(([k, n]) => `<span>${esc(k)} · ${n}</span>`).join("")}</div></section>` : ""}
       <div><button class="btn" id="csv">${esc(t.exportCsv)}</button></div>`;
     $("#csv").addEventListener("click", exportCsv);
+    bindOpen(box);
+    box.querySelectorAll("tr[data-open]").forEach(r => r.addEventListener("keydown", ev => { if (ev.key === "Enter") JV.openEntry(r.dataset.open); }));
   }
   function exportCsv() {
     const D = JV.DIMS, q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const head = ["date", "company", "role", "title", "roleType", "seniority", "region", ...D, "skills", "status"];
-    const lines = st.entries.filter(e => e.type === "apply").map(e => [e.date.slice(0, 10), e.company, e.role, e.title, e.roleType, e.seniority,
-      st.regions.find(r => r.id === e.regionId)?.name, ...D.map(d => e.focus?.[d] ?? ""), (e.skills || []).join("; "), e.status].map(q).join(","));
+    const head = ["id", "date", "logged", "company", "role", "title", "roleType", "seniority", "region", ...D, "skills", "status", "edited_by_hand", "ai_model", "source_url"];
+    const lines = st.entries.filter(e => e.type === "apply").map(e => [e.id, e.date.slice(0, 10), (e.createdAt || "").slice(0, 10), e.company, e.role, e.title, e.roleType, e.seniority,
+      S.regionName(e.regionId), ...D.map(d => e.focus?.[d] ?? ""), (e.skills || []).join("; "), e.status, (e.edited || []).join(" "), e.ai?.model || "", e.source?.url || ""].map(q).join(","));
     const blob = new Blob(["\ufeff" + [head.join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `waymark-jobs-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -183,6 +201,9 @@
   function renderAll() { renderMapPane(); renderChat(); renderDrafts(); const v = document.body.dataset.view; if (v === "review") renderReview(); if (v === "skills") renderSkills(); }
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
 
+  JV.refresh = () => renderAll();
+  $("#open-settings").addEventListener("click", () => JV.openSettings());
+  S.migrate();
   applyLang();
   window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (["map", "log", "review", "skills"].includes(h) && h !== document.body.dataset.view) go(h); });
   go(["map", "log", "review", "skills"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "map");

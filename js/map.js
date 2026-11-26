@@ -131,7 +131,7 @@ window.JV = window.JV || {};
 
   // ---- entry card (tooltip) ----
   const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  JV.entryCard = function (e) {
+  JV.entryCard = function (e, withEdit) {
     const t = JV.t(), date = t.dateFmt(new Date(e.date));
     const meta = [t.types[e.type], e.roleType && t.roles[e.roleType], e.seniority && t.seniorityL[e.seniority], date].filter(Boolean).join(" · ");
     let html = `<div class="tip-title">${esc(e.title || [e.role, e.company].filter(Boolean).join(" · "))}</div><div class="tip-meta">${esc(meta)}</div>`;
@@ -142,6 +142,7 @@ window.JV = window.JV || {};
       if (!f.length && !e.skills?.length) html += `<div class="tip-meta">${esc(t.noProfile)}</div>`;
     }
     if (e.insight) html += `<div>${esc(e.insight)}</div>`;
+    if (withEdit) html += `<div><button class="btn" type="button" data-edit="${esc(e.id)}">${esc(t.openRecord)}</button></div>`;
     return html;
   };
 
@@ -150,7 +151,8 @@ window.JV = window.JV || {};
     const tip = document.getElementById("tip"), wrap = svg.parentElement;
     const show = (node, pin) => {
       const e = JV.store.state.entries.find(x => x.id === node.dataset.eid); if (!e) return;
-      tip.innerHTML = JV.entryCard(e); tip.hidden = false; tip.classList.toggle("pinned", !!pin);
+      tip.innerHTML = JV.entryCard(e, pin); tip.hidden = false; tip.classList.toggle("pinned", !!pin);
+      tip.querySelector("[data-edit]")?.addEventListener("click", ev => { ev.stopPropagation(); pinned = null; tip.hidden = true; JV.openEntry(e.id); });
       const r = node.getBoundingClientRect(), w = wrap.getBoundingClientRect();
       const tw = tip.offsetWidth, th = tip.offsetHeight;
       let x = r.left - w.left + r.width / 2 - tw / 2, y = r.top - w.top - th - 10;
