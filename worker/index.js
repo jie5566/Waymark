@@ -1,6 +1,8 @@
 // Waymark · AI follow-up (Cloudflare Worker)
 // Holds the Gemini key as the secret GEMINI_API_KEY and returns structured draft entries.
 // Set in the Cloudflare dashboard: GEMINI_API_KEY (secret), optional GEMINI_MODEL, ALLOWED_ORIGIN.
+// Job discovery (daily cron + POST /jobs) lives in jobs.js.
+import { handleJobs, runDiscovery } from "./jobs.js";
 
 let cors = {};
 const LANG_NAME = { zh: "Simplified Chinese", en: "English", sv: "Swedish" };
@@ -87,7 +89,12 @@ export default {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
   // Private use: only requests carrying the access code (secret APP_TOKEN) are served.
   if (env.APP_TOKEN && req.headers.get("x-waymark-token") !== env.APP_TOKEN) return json({ error: "unauthorized" }, 401);
-  if (new URL(req.url).pathname === "/sync") return handleSync(req, env);
+  const path = new URL(req.url).pathname;
+  if (path === "/sync") return handleSync(req, env);
+  if (path === "/jobs") {
+    if (!env.APP_TOKEN) return json({ error: "jobs needs APP_TOKEN" }, 403);
+    return handleJobs(req, env, json);
+  }
   if (!GEMINI_KEY) return json({ error: "GEMINI_API_KEY is not set" }, 500);
 
   let body;
@@ -153,6 +160,11 @@ export default {
     // Keep a short sample to see what went wrong (truncation, extra text, ...).
     return json({ error: "parse", finish: data?.candidates?.[0]?.finishReason, sample: text.slice(0, 400), tail: text.slice(-200) }, 502);
   }
+  },
+
+  // Daily job discovery (cron in wrangler.toml).
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runDiscovery(env).then(r => console.log("discovery", JSON.stringify(r))));
   },
 };
 
