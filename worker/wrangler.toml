@@ -1,3 +1,5 @@
 name = "waymark-ai"
 main = "index.js"
 compatibility_date = "2026-11-01"
+# Keep variables set in the Cloudflare dashboard (secrets like GEMINI_API_KEY and APP_TOKEN are kept either way).
+keep_vars = true
