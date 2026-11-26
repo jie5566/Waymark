@@ -9,3 +9,7 @@ keep_vars = true
 binding = "DB"
 database_name = "waymark"
 database_id = "b31f9e1c-79fb-497f-9f0f-a72ae0199924"
+
+# Daily job discovery from Platsbanken, 05:17 UTC (06:17 in Stockholm in winter, 07:17 in summer).
+[triggers]
+crons = ["17 5 * * *"]

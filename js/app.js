@@ -53,30 +53,33 @@
     $("#quick").innerHTML = (list || []).map(q => `<button class="btn" type="button">${esc(q)}</button>`).join("");
     $$("#quick button").forEach(b => b.addEventListener("click", () => send(b.textContent)));
   }
-  async function send(text) {
-    text = text.trim(); if (!text || busy) return;
-    st.chat.push({ role: "me", text }); busy = true; setQuick([]); renderChat(); S.save();
+  // opts (used by job discovery): display = what shows in the chat, url / sourceText = the job post kept with the record.
+  async function send(text, opts = {}) {
+    text = text.trim(); if (!text || busy) return false;
+    st.chat.push({ role: "me", text: opts.display || text }); busy = true; setQuick([]); renderChat(); S.save();
     try {
       const r = await JV.ask(text);
       if (r.reply) st.chat.push({ role: "ai", text: r.reply });
       if (r.entries?.length) {
         // Keep the job post as pasted (and its link) with the record, so it can be re-read and re-analysed later.
-        const url = text.match(/https?:\/\/\S+/)?.[0] || "";
+        const url = opts.url || text.match(/https?:\/\/\S+/)?.[0] || "";
         drafts = drafts.concat(r.entries.map(d => d.type === "apply"
-          ? { ...d, source: { url, text: text.slice(0, 12000) }, _meta: { model: r.model } } : d));
+          ? { ...d, source: { url, text: (opts.sourceText || text).slice(0, 12000) }, _meta: { model: r.model } } : d));
       }
       setQuick(r.quickReplies);
     } catch (err) {
       if (err.status === 401) {
         // Wrong or missing access code: ask for it, and put the message back so nothing is lost.
-        st.chat.pop(); $("#msg").value = text; showToken(true);
+        st.chat.pop(); if (!opts.display) $("#msg").value = text; showToken(true);
       } else {
         st.chat.push({ role: "ai", text: JV.t().aiError });
-        drafts.push({ type: "apply", title: text.slice(0, 60), region: st.regions[0]?.name });
+        drafts.push(opts.fallback || { type: "apply", title: text.slice(0, 60), region: st.regions[0]?.name });
       }
     }
     busy = false; S.save(); renderChat(); renderDrafts();
+    return true;
   }
+  JV.sendLog = send;
   $("#composer").addEventListener("submit", e => { e.preventDefault(); const m = $("#msg"); send(m.value); m.value = ""; m.style.height = ""; });
   $("#msg").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#composer").requestSubmit(); } });
   $("#msg").addEventListener("input", e => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; });
@@ -90,7 +93,7 @@
   }
   $("#token-form").addEventListener("submit", e => {
     e.preventDefault(); const v = $("#token-input").value.trim(); if (!v) return;
-    JV.setToken(v); $("#token-input").value = ""; $("#token-form").hidden = true;
+    JV.setToken(v); $("#token-input").value = ""; $("#token-form").hidden = true; JV.loadPicks && JV.loadPicks(true);
     JV.sync && JV.sync({ force: true }).then(r => r.received && renderAll()).catch(() => {});
     if ($("#msg").value.trim()) $("#composer").requestSubmit();
   });
@@ -198,7 +201,7 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
-  function renderAll() { renderMapPane(); renderChat(); renderDrafts(); const v = document.body.dataset.view; if (v === "review") renderReview(); if (v === "skills") renderSkills(); }
+  function renderAll() { renderMapPane(); renderChat(); renderDrafts(); JV.renderPicks && JV.renderPicks(); const v = document.body.dataset.view; if (v === "review") renderReview(); if (v === "skills") renderSkills(); }
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
 
   JV.refresh = () => renderAll();

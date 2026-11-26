@@ -116,6 +116,7 @@ window.JV = window.JV || {};
           </form>
           <div class="row"><button class="btn primary" id="sync-now"${has ? "" : " disabled"}>${esc(t.syncNow)}</button><span class="muted small" id="sync-msg">${esc(has ? last : t.syncNeedsToken)}</span></div>
         </section>
+        <section class="set-sec" id="set-jobs"></section>
         <section class="set-sec">
           <h3>${esc(t.backupTitle)}</h3>
           <p class="muted small">${esc(t.backupLead(st.entries.length))}</p>
@@ -127,9 +128,10 @@ window.JV = window.JV || {};
         </section>
       </div>`, () => JV.refresh && JV.refresh());
 
+    if (JV.renderJobSettings) JV.renderJobSettings($("#set-jobs"));
     $("#set-token").addEventListener("submit", ev => {
       ev.preventDefault(); const v = $("#set-token-in").value.trim(); if (!v) return;
-      JV.setToken(v); JV.openSettings(); JV.sync && JV.sync({ force: true }).then(() => JV.openSettings()).catch(() => JV.openSettings());
+      JV.setToken(v); JV.loadPicks && JV.loadPicks(true); JV.openSettings(); JV.sync && JV.sync({ force: true }).then(() => JV.openSettings()).catch(() => JV.openSettings());
     });
     $("#sync-now").addEventListener("click", async () => {
       const m = $("#sync-msg"); m.textContent = t.syncing;
