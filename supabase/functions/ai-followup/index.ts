@@ -21,9 +21,10 @@ const responseSchema = {
   type: "OBJECT",
   properties: {
     reply: { type: "STRING" },
-    quickReplies: { type: "ARRAY", items: { type: "STRING" } },
+    quickReplies: { type: "ARRAY", items: { type: "STRING" }, maxItems: 3 },
     entries: {
       type: "ARRAY",
+      maxItems: 5,
       items: {
         type: "OBJECT",
         properties: {
@@ -35,13 +36,14 @@ const responseSchema = {
           insight: { type: "STRING" },
           nextDate: { type: "STRING" },
           nextText: { type: "STRING" },
-          keywords: { type: "ARRAY", items: { type: "STRING" } },
           roleType: { type: "STRING", enum: ["product_design", "ux", "ui", "ux_research", "pm", "ai", "frontend", "graphic", "service", "other"] },
           seniority: { type: "STRING", enum: ["intern", "junior", "mid", "senior", "lead", "unknown"] },
-          skills: { type: "ARRAY", items: { type: "STRING" } },
+          skills: { type: "ARRAY", items: { type: "STRING" }, maxItems: 10 },
           focus: { type: "OBJECT", properties: { ux: { type: "INTEGER" }, ui: { type: "INTEGER" }, research: { type: "INTEGER" }, product: { type: "INTEGER" }, ai: { type: "INTEGER" }, code: { type: "INTEGER" }, systems: { type: "INTEGER" }, brand: { type: "INTEGER" } } },
         },
         required: ["type", "title"],
+        // Scores before the skill list, so a long list can never crowd them out.
+        propertyOrdering: ["type", "title", "company", "role", "region", "roleType", "seniority", "focus", "skills", "insight", "nextDate", "nextText"],
       },
     },
   },
@@ -58,7 +60,7 @@ Your job on every turn:
 3. Write a short reply (max 3 sentences). Ground any encouragement in the user's own numbers below, never generic praise. ${quiet ? "Quiet mode is on: do not ask any question, just confirm what was logged." : "Ask at most ONE follow-up question, only if it adds value: what they changed for this application, what they learned, or who they could contact next. Do not ask the same kind of question every time."}
 4. When it helps, suggest a concrete next step with a date (YYYY-MM-DD), e.g. reaching out to a designer on the hiring team 5 days after applying. Say which roles or people to look for; you cannot search LinkedIn yourself.
 5. quickReplies: 0–3 very short tappable answers to your question, in the user's language.
-6. For every apply entry, profile the job so it can be compared with other jobs:\n   - roleType: the closest of product_design, ux, ui, ux_research, pm, ai, frontend, graphic, service, other.\n   - seniority: intern, junior, mid, senior, lead, or unknown.\n   - skills: the 5–10 most important concrete skills or tools the post asks for (short, English, lower case, e.g. "figma", "design systems", "prompt design").\n   - focus: score how much the post demands each area, 0 = not at all, 1 = mentioned, 2 = important, 3 = core of the role: ux (interaction and UX design), ui (visual and UI craft), research (user research and testing), product (product thinking, strategy, PM), ai (AI/ML products, LLMs, prompt and agent design), code (front-end or engineering), systems (design systems and components), brand (brand, marketing, content, motion).\n   Base it on the job post text when you have it; if you only have the user's words, fill what you can and use 0 for the rest.
+6. For every apply entry, profile the job so it can be compared with other jobs:\n   - roleType: the closest of product_design, ux, ui, ux_research, pm, ai, frontend, graphic, service, other.\n   - seniority: intern, junior, mid, senior, lead, or unknown.\n   - skills: at most 10 of the most important concrete skills or tools the post itself asks for, no repeats, nothing the post does not mention (short, English, lower case, e.g. "figma", "design systems", "prompt design").\n   - focus: score how much the post demands each area, 0 = not at all, 1 = mentioned, 2 = important, 3 = core of the role: ux (interaction and UX design), ui (visual and UI craft), research (user research and testing), product (product thinking, strategy, PM), ai (AI/ML products, LLMs, prompt and agent design), code (front-end or engineering), systems (design systems and components), brand (brand, marketing, content, motion).\n   Base it on the job post text when you have it; if you only have the user's words, fill what you can and use 0 for the rest.
 If a link could not be read, ask for the company and role instead of guessing.\nEvery field is short, final text for the user (title and role under 60 characters, insight and nextText under 140). Never put reasoning, notes or placeholders in any field.
 
 Today is ${today}. User's recent numbers: ${JSON.stringify(stats)}.`;
@@ -150,9 +152,8 @@ function clean(o) {
       type: ["apply", "connect", "make", "learn", "rest"].includes(e.type) ? e.type : "apply",
       title: cut(e.title, 80), company: cut(e.company, 60), role: cut(e.role, 80), region: cut(e.region, 30),
       insight: cut(e.insight, 200), nextDate: cut(e.nextDate, 10), nextText: cut(e.nextText, 160),
-      keywords: (e.keywords || []).slice(0, 6).map(k => cut(k, 30)).filter(Boolean),
       roleType: cut(e.roleType, 20), seniority: cut(e.seniority, 10),
-      skills: (e.skills || []).slice(0, 10).map(k => cut(k, 40)).filter(Boolean),
+      skills: [...new Set((e.skills || []).map(k => cut(k, 40)).filter(Boolean))].slice(0, 10),
       focus: e.focus && typeof e.focus === "object"
         ? Object.fromEntries(["ux", "ui", "research", "product", "ai", "code", "systems", "brand"].map(d => [d, Math.max(0, Math.min(3, Math.round(Number(e.focus[d]) || 0)))]))
         : undefined,
