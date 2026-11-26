@@ -3,6 +3,7 @@
 // Set in the Cloudflare dashboard: GEMINI_API_KEY (secret), optional GEMINI_MODEL, ALLOWED_ORIGIN.
 // Job discovery (daily cron + POST /jobs) lives in jobs.js.
 import { handleJobs, runDiscovery } from "./jobs.js";
+import { OWNER, logUsage, overLimit, usageSummary, deleteUsage } from "./usage.js";
 
 let cors = {};
 const LANG_NAME = { zh: "Simplified Chinese", en: "English", sv: "Swedish" };
@@ -57,13 +58,30 @@ If a link could not be read, ask for the company and role instead of guessing.\n
 Today is ${today}. User's recent numbers: ${JSON.stringify(stats)}.`;
 }
 
+// Only ordinary public web pages: http(s), default ports, no IP addresses or local names.
+function isPublicUrl(raw) {
+  let u; try { u = new URL(raw); } catch { return false; }
+  if (!["http:", "https:"].includes(u.protocol) || u.port || u.username || u.password) return false;
+  const h = u.hostname.toLowerCase();
+  if (!h.includes(".") || h.startsWith("[") || /^[\d.]+$/.test(h)) return false;
+  if (/(^|\.)(localhost|local|internal|lan|home|arpa)$/.test(h)) return false;
+  return true;
+}
+
 async function fetchPageText(url) {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 6000);
-    const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "Mozilla/5.0 WaymarkBot" } });
+    // Follow at most 3 redirects by hand, checking every hop.
+    let res = null;
+    for (let hop = 0; hop < 4 && isPublicUrl(url); hop++) {
+      res = await fetch(url, { signal: ctrl.signal, redirect: "manual", headers: { "User-Agent": "Mozilla/5.0 WaymarkBot" } });
+      const next = res.status >= 300 && res.status < 400 && res.headers.get("location");
+      if (!next) break;
+      url = new URL(next, url).toString(); res = null;
+    }
     clearTimeout(t);
-    if (!res.ok) return "";
+    if (!res || !res.ok) return "";
     const html = await res.text();
     return html
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -77,7 +95,7 @@ async function fetchPageText(url) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
   const GEMINI_KEY = env.GEMINI_API_KEY || "";
   const GEMINI_MODEL = env.GEMINI_MODEL || "gemini-3.5-flash-lite";
   cors = {
@@ -88,14 +106,20 @@ export default {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
   // Private use: only requests carrying the access code (secret APP_TOKEN) are served.
-  if (env.APP_TOKEN && req.headers.get("x-waymark-token") !== env.APP_TOKEN) return json({ error: "unauthorized" }, 401);
+  // Without APP_TOKEN nothing is served, so a missing secret can never leave the AI open to anyone.
+  if (!env.APP_TOKEN) return json({ error: "APP_TOKEN is not set" }, 403);
+  if (!sameSecret(req.headers.get("x-waymark-token") || "", env.APP_TOKEN)) return json({ error: "unauthorized" }, 401);
+  const userId = OWNER; // becomes the signed-in user once accounts exist
   const path = new URL(req.url).pathname;
   if (path === "/sync") return handleSync(req, env);
-  if (path === "/jobs") {
-    if (!env.APP_TOKEN) return json({ error: "jobs needs APP_TOKEN" }, 403);
-    return handleJobs(req, env, json);
+  if (path === "/jobs") return handleJobs(req, env, json);
+  if (path === "/usage") {
+    if (!env.DB) return json({ error: "no database bound" }, 503);
+    return json(await usageSummary(env, userId));
   }
+  if (path === "/account/delete") return handleDeleteAll(req, env, userId);
   if (!GEMINI_KEY) return json({ error: "GEMINI_API_KEY is not set" }, 500);
+  if (await overLimit(env, userId)) return json({ error: "daily_limit" }, 429);
 
   let body;
   try { body = await req.json(); } catch { return json({ error: "Bad JSON" }, 400); }
@@ -150,15 +174,20 @@ export default {
     res = null;
   }
   if (!res) return json({ error: lastErr }, 503);
-  if (!res.ok) return json({ error: "Gemini error", status: res.status, detail: await res.text() }, 502);
+  if (!res.ok) {
+    // Details stay in the Worker log, never in the reply to the browser.
+    console.log("gemini error", res.status, (await res.text()).slice(0, 300));
+    return json({ error: "Gemini error", status: res.status }, 502);
+  }
 
   const data = await res.json();
+  ctx.waitUntil(logUsage(env, { userId, route: mode === "analyze" ? "analyze" : "chat", model: usedModel, meta: data?.usageMetadata }));
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "{}";
   try {
     return json({ ...clean(JSON.parse(text)), model: usedModel, analysisVersion: 2 });
   } catch {
-    // Keep a short sample to see what went wrong (truncation, extra text, ...).
-    return json({ error: "parse", finish: data?.candidates?.[0]?.finishReason, sample: text.slice(0, 400), tail: text.slice(-200) }, 502);
+    console.log("parse failed", data?.candidates?.[0]?.finishReason, text.length);
+    return json({ error: "parse", finish: data?.candidates?.[0]?.finishReason }, 502);
   }
   },
 
@@ -169,6 +198,33 @@ export default {
 };
 
 const ANALYZE_NOTE = "\n\nThis turn is a re-analysis of a job post the user already logged. Return exactly one apply entry with its full profile (roleType, seniority, focus, skills). Reply with one short sentence and no question.";
+
+// Compare secrets without leaking how much of them matched through timing.
+function sameSecret(a, b) {
+  const enc = new TextEncoder(), x = enc.encode(a), y = enc.encode(b);
+  if (x.byteLength !== y.byteLength) return false;
+  let diff = 0;
+  for (let i = 0; i < x.byteLength; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+// ---------- delete all data ----------
+// Removes every record, the job list, settings and the usage log from the cloud. Deleted records leave
+// a tombstone (id only, no content) so your other devices also remove their copies on their next sync.
+async function handleDeleteAll(req, env, userId) {
+  if (!env.DB) return json({ error: "no database bound" }, 503);
+  let body; try { body = await req.json(); } catch { body = {}; }
+  if (body.confirm !== "DELETE") return json({ error: "confirm with {confirm: \"DELETE\"}" }, 400);
+  const db = env.DB, ts = Date.now();
+  const has = async t => !!(await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1").bind(t).first());
+  const steps = [];
+  if (await has("items")) steps.push(db.prepare("UPDATE items SET deleted = 1, data = NULL, updated_at = ?1, server_ts = ?2").bind(ts, ts));
+  if (await has("jobs")) steps.push(db.prepare("DELETE FROM jobs"));
+  if (await has("job_settings")) steps.push(db.prepare("DELETE FROM job_settings"));
+  if (steps.length) await db.batch(steps);
+  await deleteUsage(env, userId);
+  return json({ ok: true });
+}
 
 // ---------- cloud sync (D1) ----------
 // One table of items (entries and regions). For each id the copy with the newer updatedAt wins.

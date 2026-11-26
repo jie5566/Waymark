@@ -72,7 +72,7 @@
         // Wrong or missing access code: ask for it, and put the message back so nothing is lost.
         st.chat.pop(); if (!opts.display) $("#msg").value = text; showToken(true);
       } else {
-        st.chat.push({ role: "ai", text: JV.t().aiError });
+        st.chat.push({ role: "ai", text: err.status === 429 ? JV.t().aiLimit : JV.t().aiError });
         drafts.push(opts.fallback || { type: "apply", title: text.slice(0, 60), region: st.regions[0]?.name });
       }
     }

@@ -5,6 +5,7 @@
 // The app asks POST /jobs for today's few picks; "applied" turns a pick into a normal journal entry.
 
 import { detectCompany, fetchCompany, keepCompanyJob, companyName } from "./companies.js";
+import { SYSTEM, logUsageMany } from "./usage.js";
 
 const AF_API = "https://jobsearch.api.jobtechdev.se/search";
 const DIMS = ["ux", "ui", "research", "product", "ai", "code", "systems", "brand"];
@@ -126,7 +127,7 @@ Return:
 - language: the language the ad requires (e.g. "swedish", "english", "swedish+english").
 - summary: one line (max 90 characters) per language, zh in Simplified Chinese, en in English, sv in Swedish, saying what the role is about and anything notable (language requirement, seniority). No praise, no emojis.`;
 
-async function profileJob(env, job) {
+async function profileJob(env, job, used = []) {
   const key = env.GEMINI_API_KEY; if (!key) return null;
   const models = [...new Set([env.GEMINI_MODEL || "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"])];
   for (const model of models) {
@@ -143,6 +144,7 @@ async function profileJob(env, job) {
       });
       if (!res.ok) { if ([429, 500, 503].includes(res.status)) continue; return null; }
       const data = await res.json();
+      used.push({ model, meta: data?.usageMetadata });
       const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text ?? "").join("") ?? "";
       return { ...cleanProfile(JSON.parse(text)), model };
     } catch { /* timeout or bad JSON: try the next model */ } finally { clearTimeout(timer); }
@@ -217,9 +219,10 @@ export async function runDiscovery(env) {
   ).bind(ANALYZE_PER_RUN).all();
   const mine = await myProfile(db);
   let analysed = 0;
+  const used = []; // AI calls of this run, written to the usage log in one go
   for (let i = 0; i < todo.length; i += 4) {
     const batch = todo.slice(i, i + 4);
-    const profiles = await Promise.all(batch.map(j => profileJob(env, j)));
+    const profiles = await Promise.all(batch.map(j => profileJob(env, j, used)));
     const writes = [];
     batch.forEach((j, k) => {
       if (!profiles[k]) return;
@@ -229,6 +232,7 @@ export async function runDiscovery(env) {
     });
     if (writes.length) await db.batch(writes);
   }
+  await logUsageMany(env, SYSTEM, "jobs.profile", used);
 
   // Re-score older ads as your profile changes; drop old ones you never acted on.
   if (mine) {
