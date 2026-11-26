@@ -17,6 +17,7 @@ js/ai.js                调用后端；未配置时用内置的简单回复
 js/app.js               对话、草稿卡片、每周回看
 js/jobs.js              今日发现：每天从 Platsbanken 挑几个贴合的职位，“我申请了”直接进入记录对话
 worker/jobs.js          后端：每天定时抓取、AI 分析、打分（见 worker/README.md）
+worker/companies.js     关注的公司：识别招聘系统（Teamtailor / Greenhouse / Lever / Ashby），读官网职位
 supabase/functions/ai-followup/index.ts
                         后端：保管 Gemini 密钥，读取职位链接，返回结构化的记录草稿
 ```

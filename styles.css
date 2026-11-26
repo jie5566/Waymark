@@ -192,3 +192,10 @@ details summary{cursor:pointer;font-size:13px;color:var(--blue)}
 .job-set{display:flex;flex-direction:column;gap:10px}
 .job-set .row label{flex:1;min-width:120px}
 .job-set textarea{resize:vertical}
+.co-sec{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.co-sec h4{margin:0;font-size:13px;font-weight:600}
+.co-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.co-list li{display:flex;align-items:center;gap:10px;min-height:40px;border-bottom:1px solid var(--line);font-size:14px}
+.co-list li a{color:var(--ink);text-decoration:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.co-list li .icon-btn{width:32px;height:32px;font-size:18px;color:var(--muted)}
+.co-sec .token-row input{flex:1;min-width:0;border:1px solid var(--line);border-radius:18px;padding:0 14px;min-height:36px;font-size:16px;background:var(--surface)}

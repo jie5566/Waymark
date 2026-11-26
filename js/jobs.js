@@ -49,7 +49,7 @@ window.JV = window.JV || {};
       <div id="picks-list" class="picks-list"${open ? "" : " hidden"}>
         ${picks.map(p => {
           const pr = p.profile || {};
-          const meta = [p.company, p.location, p.deadline ? J.deadline(t.dateFmt(new Date(p.deadline))) : ""].filter(Boolean).join(" · ");
+          const meta = [p.source && p.source !== "platsbanken" ? J.followed : "", p.company, p.location, p.deadline ? J.deadline(t.dateFmt(new Date(p.deadline))) : ""].filter(Boolean).join(" · ");
           return `<article class="pick" data-id="${esc(p.id)}">
             <div class="pick-top"><h3>${esc(p.title)}</h3><span class="fit ${p.score >= 0.8 ? "hi" : ""}">${esc(p.score >= 0.8 ? J.fitHigh : J.fitMid)}</span></div>
             <p class="muted small">${esc(meta)}</p>
@@ -108,7 +108,43 @@ window.JV = window.JV || {};
         </div>
         <div class="row"><button class="btn" type="submit">${esc(t.save)}</button><button class="btn primary" type="button" id="js-run">${esc(J.setRun)}</button></div>
         <p class="muted small" id="js-msg" role="status">${esc(data?.lastRun ? J.lastRun(new Date(data.lastRun).toLocaleString()) : "")}</p>
-      </form>`;
+      </form>
+      <div class="co-sec">
+        <h4>${esc(J.coTitle)}</h4>
+        <p class="muted small">${esc(J.coLead)}</p>
+        <ul class="co-list" id="co-list"></ul>
+        <form class="token-row" id="co-add">
+          <label class="sr-only" for="co-url">${esc(J.coPlaceholder)}</label>
+          <input id="co-url" type="url" inputmode="url" placeholder="${esc(J.coPlaceholder)}">
+          <button class="btn" type="submit">${esc(J.coAdd)}</button>
+        </form>
+        <p class="muted small" id="co-msg" role="status"></p>
+      </div>`;
+    const coMsg = root.querySelector("#co-msg");
+    const renderCos = list => {
+      const ul = root.querySelector("#co-list");
+      ul.innerHTML = list.length ? list.map(c => `<li><a href="${esc(c.page)}" target="_blank" rel="noopener">${esc(c.name)}</a>
+        <span class="muted small">${esc(J.ats[c.ats] || c.ats)}</span>
+        <button class="icon-btn" type="button" data-feed="${esc(c.feed)}" aria-label="${esc(J.coRemove(c.name))}">×</button></li>`).join("")
+        : `<li class="muted small">${esc(J.coEmpty)}</li>`;
+      ul.querySelectorAll("[data-feed]").forEach(b => b.addEventListener("click", async () => {
+        try { renderCos((await JV.jobsApi({ action: "removeCompany", feed: b.dataset.feed })).settings.companies); coMsg.textContent = ""; }
+        catch { coMsg.textContent = J.setFailed; }
+      }));
+    };
+    renderCos(s.companies || []);
+    root.querySelector("#co-add").addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const input = root.querySelector("#co-url"), url = input.value.trim(); if (!url) return;
+      coMsg.textContent = J.coChecking;
+      try {
+        const r = await JV.jobsApi({ action: "addCompany", url });
+        renderCos(r.settings.companies); input.value = "";
+        coMsg.textContent = J.coAdded(r.added.name, r.openJobs);
+      } catch (err) {
+        coMsg.textContent = err.status === 422 ? J.coUnsupported : err.status === 409 ? J.coExists : J.setFailed;
+      }
+    });
     const msg = root.querySelector("#js-msg");
     root.querySelector("#job-set").addEventListener("submit", async ev => {
       ev.preventDefault();

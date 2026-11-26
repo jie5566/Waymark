@@ -14,3 +14,7 @@ Job discovery (`jobs.js`): a daily cron (05:17 UTC) reads new design jobs near S
 (same rubric as logged applications plus a one-line summary in zh/en/sv) and scores them against the average focus of
 the jobs you applied for (from synced entries). `POST /jobs` (needs `APP_TOKEN`): `{action: "list" | "set" | "settings" | "refresh"}`.
 Search words, radius and picks per day are editable in the app under Settings → Job discovery.
+
+Followed companies (`companies.js`): paste a careers link in Settings and the Worker detects its applicant tracking
+system (Teamtailor incl. custom domains, Greenhouse, Lever, Ashby) and reads that system's public job feed every day.
+Only design titles in the places listed in `placeWords` (Stockholm, Sweden, remote, …) are kept. Up to 20 companies.

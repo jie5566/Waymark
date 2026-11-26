@@ -4,6 +4,8 @@
 // applications, and scores them against the profile of the jobs you have applied for.
 // The app asks POST /jobs for today's few picks; "applied" turns a pick into a normal journal entry.
 
+import { detectCompany, fetchCompany, keepCompanyJob, companyName } from "./companies.js";
+
 const AF_API = "https://jobsearch.api.jobtechdev.se/search";
 const DIMS = ["ux", "ui", "research", "product", "ai", "code", "systems", "brand"];
 const ROLE_TYPES = ["product_design", "ux", "ui", "ux_research", "pm", "ai", "frontend", "graphic", "service", "other"];
@@ -15,7 +17,12 @@ export const DEFAULT_SETTINGS = {
   position: "59.329,18.068",
   radiusKm: 50,
   perDay: 5,
+  // Careers pages you follow (added from the app by pasting a link, see companies.js).
+  companies: [],
+  // A followed company's job counts as "nearby" when its location mentions one of these (or has none).
+  placeWords: ["stockholm", "solna", "sundbyberg", "sweden", "sverige", "remote", "distans", "hybrid"],
 };
+const MAX_COMPANIES = 20;     // one request each per run, within the free plan's limits
 const ANALYZE_PER_RUN = 12;   // keeps one run well under the free plan's subrequest limit
 const KEEP_DAYS = 60;
 
@@ -45,6 +52,11 @@ async function saveSettings(db, input) {
   if (Array.isArray(input.queries)) next.queries = [...new Set(input.queries.map(q => String(q).trim().slice(0, 60)).filter(Boolean))].slice(0, 10);
   if (input.radiusKm != null) next.radiusKm = Math.max(5, Math.min(300, Math.round(Number(input.radiusKm) || DEFAULT_SETTINGS.radiusKm)));
   if (input.perDay != null) next.perDay = Math.max(1, Math.min(10, Math.round(Number(input.perDay) || DEFAULT_SETTINGS.perDay)));
+  if (Array.isArray(input.placeWords)) next.placeWords = [...new Set(input.placeWords.map(w => String(w).trim().toLowerCase().slice(0, 40)).filter(Boolean))].slice(0, 20);
+  if (Array.isArray(input.companies)) next.companies = input.companies
+    .filter(c => c && ["teamtailor", "greenhouse", "lever", "ashby"].includes(c.ats) && /^https:\/\//.test(c.feed || ""))
+    .map(c => ({ ats: c.ats, key: String(c.key).slice(0, 120), feed: String(c.feed).slice(0, 300), page: String(c.page || "").slice(0, 300), name: String(c.name || c.key).slice(0, 60) }))
+    .slice(0, MAX_COMPANIES);
   if (typeof input.position === "string" && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(input.position)) next.position = input.position;
   await db.prepare("INSERT INTO job_settings (k, v) VALUES ('settings', ?1) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(JSON.stringify(next)).run();
   return next;
@@ -80,7 +92,7 @@ function fromAf(h) {
   const page = typeof h.webpage_url === "string" ? h.webpage_url : `https://arbetsformedlingen.se/platsbanken/annonser/${h.id}`;
   const title = String(h.headline || "").slice(0, 160), company = String(h.employer?.name || "").slice(0, 120);
   return {
-    id: "af:" + h.id, source: "platsbanken", dkey: normCompany(company) + "|" + norm(title),
+    id: "af:" + h.id, source: "platsbanken",
     title, company, location: String(addr.municipality || addr.city || addr.region || "").slice(0, 80),
     url: page, apply_url: String(h.application_details?.url || "").slice(0, 500),
     deadline: String(h.application_deadline || "").slice(0, 10), published: String(h.publication_date || "").slice(0, 19),
@@ -180,9 +192,18 @@ export async function runDiscovery(env) {
   const settings = await getSettings(db);
   const now = Date.now();
 
-  const found = await fetchPlatsbanken(settings);
+  // Followed companies first: when the same role is also on Platsbanken, keep the company's own link.
+  const found = [], failed = [];
+  for (const c of settings.companies.slice(0, MAX_COMPANIES)) {
+    try { for (const j of await fetchCompany(c)) if (keepCompanyJob(j, settings.placeWords)) found.push(j); }
+    catch { failed.push(c.name || c.key); }
+  }
+  found.push(...await fetchPlatsbanken(settings));
   const seen = new Set(), fresh = [];
-  for (const j of found) if (j.title && !seen.has(j.id) && !seen.has(j.dkey)) { seen.add(j.id); seen.add(j.dkey); fresh.push(j); }
+  for (const j of found) {
+    j.dkey = normCompany(j.company) + "|" + norm(j.title);
+    if (j.title && !seen.has(j.id) && !seen.has(j.dkey)) { seen.add(j.id); seen.add(j.dkey); fresh.push(j); }
+  }
   if (fresh.length) {
     await db.batch(fresh.map(j => db.prepare(
       "INSERT OR IGNORE INTO jobs (id, source, dkey, title, company, location, url, apply_url, deadline, published, text, fetched_at, updated_at) " +
@@ -192,7 +213,7 @@ export async function runDiscovery(env) {
 
   // Profile the newest unprofiled ads, a few at a time.
   const { results: todo } = await db.prepare(
-    "SELECT id, title, company, location, text FROM jobs WHERE profile IS NULL AND status = 'new' ORDER BY published DESC LIMIT ?1"
+    "SELECT id, source, title, company, location, text FROM jobs WHERE profile IS NULL AND status = 'new' ORDER BY published DESC LIMIT ?1"
   ).bind(ANALYZE_PER_RUN).all();
   const mine = await myProfile(db);
   let analysed = 0;
@@ -204,27 +225,31 @@ export async function runDiscovery(env) {
       if (!profiles[k]) return;
       analysed++;
       writes.push(db.prepare("UPDATE jobs SET profile = ?1, score = ?2, updated_at = ?3 WHERE id = ?4")
-        .bind(JSON.stringify(profiles[k]), scoreJob(profiles[k], mine), Date.now(), j.id));
+        .bind(JSON.stringify(profiles[k]), withFollow(scoreJob(profiles[k], mine), j.source), Date.now(), j.id));
     });
     if (writes.length) await db.batch(writes);
   }
 
   // Re-score older ads as your profile changes; drop old ones you never acted on.
   if (mine) {
-    const { results: scored } = await db.prepare("SELECT id, profile FROM jobs WHERE status = 'new' AND profile IS NOT NULL").all();
-    const writes = scored.map(r => { try { return db.prepare("UPDATE jobs SET score = ?1 WHERE id = ?2").bind(scoreJob(JSON.parse(r.profile), mine), r.id); } catch { return null; } }).filter(Boolean);
+    const { results: scored } = await db.prepare("SELECT id, source, profile FROM jobs WHERE status = 'new' AND profile IS NOT NULL").all();
+    const writes = scored.map(r => { try { return db.prepare("UPDATE jobs SET score = ?1 WHERE id = ?2").bind(withFollow(scoreJob(JSON.parse(r.profile), mine), r.source), r.id); } catch { return null; } }).filter(Boolean);
     for (let i = 0; i < writes.length; i += 50) await db.batch(writes.slice(i, i + 50));
   }
   await db.prepare("DELETE FROM jobs WHERE status IN ('new', 'dismissed') AND fetched_at < ?1").bind(now - KEEP_DAYS * 864e5).run();
 
-  return { fetched: found.length, unique: fresh.length, analysed };
+  return { fetched: found.length, unique: fresh.length, analysed, failed };
 }
+
+// A company you chose to follow gets a small lift, but only once the role itself fits.
+const withFollow = (score, source) => (source !== "platsbanken" && score > 0.3 ? Math.min(1, Math.round((score + 0.05) * 100) / 100) : score);
 
 // ---------- POST /jobs ----------
 // { action: "list" }                        → today's picks
 // { action: "set", id, status }             → "applied" | "dismissed" | "new"
 // { action: "settings", settings? }         → read or change what to search for
 // { action: "refresh" }                     → run the daily fetch now
+// { action: "addCompany" | "removeCompany" } → follow a company's careers page
 export async function handleJobs(req, env, json) {
   const db = env.DB; if (!db) return json({ error: "no database bound" }, 503);
   let body;
@@ -236,7 +261,7 @@ export async function handleJobs(req, env, json) {
     const settings = await getSettings(db);
     const today = new Date().toISOString().slice(0, 10);
     const { results } = await db.prepare(
-      "SELECT id, title, company, location, url, apply_url, deadline, published, profile, score FROM jobs " +
+      "SELECT id, source, title, company, location, url, apply_url, deadline, published, profile, score FROM jobs " +
       "WHERE status = 'new' AND profile IS NOT NULL AND score > 0.3 AND (deadline = '' OR deadline >= ?1) " +
       "ORDER BY score DESC, published DESC LIMIT ?2"
     ).bind(today, settings.perDay).all();
@@ -266,6 +291,27 @@ export async function handleJobs(req, env, json) {
   }
 
   if (action === "refresh") return json(await runDiscovery(env));
+
+  // { action: "addCompany", url, name? } → follow a careers page
+  if (action === "addCompany") {
+    const c = await detectCompany(String(body.url || "").trim().slice(0, 300));
+    if (!c) return json({ error: "unsupported" }, 422);
+    const settings = await getSettings(db);
+    if (settings.companies.some(x => x.feed === c.feed)) return json({ error: "exists", settings }, 409);
+    if (settings.companies.length >= MAX_COMPANIES) return json({ error: "full", settings }, 409);
+    const info = await companyName(c);
+    if (!info) return json({ error: "unreachable" }, 422);
+    c.name = String(body.name || "").trim().slice(0, 60) || info.name;
+    const saved = await saveSettings(db, { companies: [...settings.companies, c] });
+    return json({ settings: saved, added: c, openJobs: info.count });
+  }
+
+  // { action: "removeCompany", feed } → stop following (jobs already found stay until acted on)
+  if (action === "removeCompany") {
+    const settings = await getSettings(db);
+    const saved = await saveSettings(db, { companies: settings.companies.filter(x => x.feed !== body.feed) });
+    return json({ settings: saved });
+  }
 
   return json({ error: "unknown action" }, 400);
 }
